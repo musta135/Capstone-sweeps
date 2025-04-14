@@ -1,0 +1,1 @@
+PWM sweeps used to sweep the drain voltage from 0% to 100% in increments of 5% (can be modified). The 'control' file enables users to maually go from step to step, whike the 'auto' file performs the entire sweep in one go. Matplot.lib is used to add a plot after the sweep is done.
