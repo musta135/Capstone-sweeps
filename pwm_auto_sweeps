@@ -1,0 +1,80 @@
+import time                          # For timing delays
+import board                        # Hardware pin reference (I2C)
+import busio                        # For I2C communication
+import digitalio                    # For GPIO pin control
+import adafruit_ads1x15.ads1115 as ADS         # ADS1115 ADC library
+from adafruit_ads1x15.analog_in import AnalogIn  # For analog pin reading
+import RPi.GPIO as GPIO             # GPIO control for Raspberry Pi
+import matplotlib.pyplot as plt     # Plotting library
+
+# GPIO Pin used for the PWM signal to the transistor's drain
+DRAIN_GPIO = 18
+PWM_FREQUENCY = 1000  # Frequency in Hz
+
+# Initialize I2C and the ADC
+i2c = busio.I2C(board.SCL, board.SDA)
+ads = ADS.ADS1115(i2c)
+ads.gain = 1  # Set gain (adjust range as needed: ±4.096V)
+
+# Set up ADC channels
+vds_channel = AnalogIn(ads, ADS.P1)  # Channel for V_DS
+vr_channel = AnalogIn(ads, ADS.P0)   # Channel across shunt resistor
+
+# Shunt resistor value (Ohms)
+SHUNT_RESISTOR = 1000.0
+
+# Initialize GPIO and start PWM
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(DRAIN_GPIO, GPIO.OUT)
+pwm = GPIO.PWM(DRAIN_GPIO, PWM_FREQUENCY)
+pwm.start(0)
+
+# Store results
+duty_cycles = []
+vds_values = []
+id_values = []
+
+try:
+    print("\nStarting automatic PWM sweep...\n")
+    print("Duty Cycle (%) | V_DS (V) | I_D (uA)")
+    print("-" * 40)
+
+    # Automatically sweep from 0% to 100% in steps of 5%
+    for duty_cycle in range(0, 101, 5):
+        pwm.ChangeDutyCycle(duty_cycle)
+        time.sleep(1)  # Give time to stabilize
+
+        # Read voltages
+        vds = vds_channel.voltage
+        vr = vr_channel.voltage
+
+        # Compute I_D in µA
+        id_current = (vr / SHUNT_RESISTOR) * 1e6
+
+        # Store values
+        duty_cycles.append(duty_cycle)
+        vds_values.append(vds)
+        id_values.append(id_current)
+
+        # Print to console
+        print(f"{duty_cycle:>12}% | {vds:.3f} V | {id_current:.2f} µA")
+
+    print("\nSweep complete. Plotting results...\n")
+
+    # Plot results
+    plt.figure(figsize=(8, 6))
+    plt.plot(vds_values, id_values, marker='o', linestyle='-', color='b')
+    plt.title('I_D vs V_DS')
+    plt.xlabel('V_{DS} (V)')
+    plt.ylabel('I_D (µA)')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+except KeyboardInterrupt:
+    print("\nProcess interrupted by user.")
+
+finally:
+    pwm.stop()
+    GPIO.cleanup()
+    print("GPIO cleanup complete.")
