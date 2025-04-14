@@ -1,0 +1,84 @@
+# Import required libraries
+import time                                  # Used to control delays between readings
+import board                                 # Provides pin definitions for I2C interface
+import busio                                 # Enables I2C communication setup
+import digitalio                             # For digital I/O, unused here but useful for future GPIO control
+import adafruit_ads1x15.ads1115 as ADS       # Import ADS1115 ADC library
+from adafruit_ads1x15.analog_in import AnalogIn  # Class for analog input channel readings
+import RPi.GPIO as GPIO                      # Used to control GPIO pins on the Raspberry Pi
+import matplotlib.pyplot as plt              # For plotting I_D vs V_DS
+
+# GPIO setup for PWM control of drain voltage
+DRAIN_GPIO = 18                              # Set the GPIO pin for the drain voltage PWM
+PWM_FREQUENCY = 1000                         # PWM frequency set to 1 kHz
+
+# Setup I2C bus and ADS1115 ADC
+i2c = busio.I2C(board.SCL, board.SDA)        # Initialize I2C using default pins
+ads = ADS.ADS1115(i2c)                       # Create ADS1115 object using I2C
+ads.gain = 1                                 # Set gain to 1x (+/- 4.096V range)
+
+# Define analog input channels
+vds_channel = AnalogIn(ads, ADS.P1)          # ADC channel for V_DS (drain-source voltage)
+vr_channel = AnalogIn(ads, ADS.P0)           # ADC channel for voltage drop across the drain resistor
+
+# Set the value of the drain (shunt) resistor in ohms
+SHUNT_RESISTOR = 1000.0                      # 1kΩ resistor used to calculate I_D from voltage
+
+# Initialize GPIO and configure PWM
+GPIO.setmode(GPIO.BCM)                       # Set GPIO numbering mode to BCM
+GPIO.setup(DRAIN_GPIO, GPIO.OUT)             # Set the drain GPIO pin as output
+pwm = GPIO.PWM(DRAIN_GPIO, PWM_FREQUENCY)    # Initialize PWM on the drain pin
+pwm.start(0)                                 # Start PWM with 0% duty cycle
+
+# Initialize lists to store results
+duty_cycles = []                             # Store duty cycle values
+vds_values = []                              # Store V_DS values
+id_values = []                               # Store calculated I_D values
+
+try:
+    # Begin the PWM voltage sweep and data acquisition
+    print("\nStarting PWM sweep...\n")
+    print("Duty Cycle (%) | V_DS (V) | I_D (uA)")
+    print("-" * 40)
+
+    # Sweep PWM duty cycle from 0% to 100% in steps of 5%
+    for duty_cycle in range(0, 101, 5):
+        input(f"\nPress Enter to proceed with duty cycle: {duty_cycle}%...")  # Manual step-by-step control
+        pwm.ChangeDutyCycle(duty_cycle)     # Update PWM output
+        time.sleep(1)                       # Wait for signal to stabilize
+
+        # Read analog values from the ADC
+        vds = vds_channel.voltage           # Measure V_DS directly
+        vr = vr_channel.voltage             # Measure voltage drop across the drain resistor
+
+        # Calculate drain current I_D using Ohm's law and convert to microamperes
+        id_current = vr * 1_000_000 / SHUNT_RESISTOR
+
+        # Save values for later plotting
+        duty_cycles.append(duty_cycle)
+        vds_values.append(vds)
+        id_values.append(id_current)
+
+        # Print results in formatted table
+        print(f"{duty_cycle:>12}% | {vds:.3f} V | {id_current:.2f} uA")
+
+    print("\nPWM sweep complete.\n")
+
+    # Plot the measured I_D vs. V_DS
+    plt.figure(figsize=(8, 6))
+    plt.plot(vds_values, id_values, marker='o', linestyle='-', color='b')
+    plt.title('I_D vs V_DS')
+    plt.xlabel('V_DS (V)')
+    plt.ylabel('I_D (uA)')
+    plt.grid(True)
+    plt.show()
+
+except KeyboardInterrupt:
+    # Gracefully handle user interrupt
+    print("\nProcess interrupted by user.")
+
+finally:
+    # Cleanup resources when done
+    pwm.stop()                # Stop PWM output
+    GPIO.cleanup()            # Reset GPIO pins
+    print("GPIO cleanup complete.")
